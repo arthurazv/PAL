@@ -296,7 +296,7 @@ final class PreAuthServiceImpl extends AbstractService implements PluginMessageL
 
         if (currentAccount.isPresent()) {
             PALAccount account = currentAccount.get();
-            if (matches(account, type, identity.getUniqueId())) return createSession(player, account);
+            if (matches(account, type, identity.getUniqueId())) return syncNameAndCreateSession(player, account, identity);
             if (canUpgradeOffline(account, type, identity)) return upgradeOfflineAccount(player, account, identity);
         }
 
@@ -305,7 +305,7 @@ final class PreAuthServiceImpl extends AbstractService implements PluginMessageL
                 PALAccount account = existing.get();
                 if (!matches(account, type, identity.getUniqueId())) return CompletableFuture.completedFuture(null);
 
-                return createSession(player, account);
+                return syncNameAndCreateSession(player, account, identity);
             }
 
             AccountCreateRequest create = type == PALAccount.Type.BEDROCK
@@ -318,6 +318,36 @@ final class PreAuthServiceImpl extends AbstractService implements PluginMessageL
 
                 return createSession(player, account);
             });
+        });
+    }
+
+    @NotNull
+    private CompletionStage<PALAccount> syncNameAndCreateSession(
+            @NotNull Player player,
+            @NotNull PALAccount account,
+            @NotNull IdentityResult identity
+    ) {
+        String targetName = identity.getName();
+        if (targetName == null || account.getName().equals(targetName)) {
+            return createSession(player, account);
+        }
+
+        InetAddress currentAddress = address(player);
+        PALAccount renamed = new StoredAccount(
+                account.getUniqueId(),
+                targetName,
+                account.getType(),
+                account.getStatus(),
+                currentAddress != null ? currentAddress : account.getLastAddress(),
+                account.getRegisteredAt(),
+                account.getLastLoginAt()
+        );
+
+        return api.getAccountService().update(renamed).thenCompose(result -> {
+            if (result.getType() != AccountResult.Type.SUCCESS || result.getAccount() == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return createSession(player, result.getAccount());
         });
     }
 

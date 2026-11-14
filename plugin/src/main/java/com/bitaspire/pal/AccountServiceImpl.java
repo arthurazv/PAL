@@ -81,11 +81,51 @@ final class AccountServiceImpl extends AbstractService implements AccountService
         return storage().findAccountById(account.getUniqueId()).thenCompose(existing -> {
             if (!existing.isPresent()) return CompletableFuture.completedFuture(AccountResult.notFound());
 
-            return storage().saveAccount(account)
-                    .thenCompose(ignored -> storage().audit(account.getUniqueId(), account.getName(), "account.update",
-                            account.getLastAddress(), account.getType().name()))
-                    .thenApply(ignored -> AccountResult.success(account));
+            PALAccount previous = existing.get();
+            if (previous.getName().equals(account.getName())) {
+                return saveAndAuditUpdate(account);
+            }
+
+            return updateWithRename(previous, account);
         }).exceptionally(throwable -> AccountResult.error("account.error"));
+    }
+
+    @NotNull
+    private CompletionStage<AccountResult> updateWithRename(@NotNull PALAccount previous, @NotNull PALAccount account) {
+        return storage().findAccountByName(account.getName()).thenCompose(existingByName -> {
+            if (existingByName.isPresent() && !existingByName.get().getUniqueId().equals(account.getUniqueId())) {
+                return CompletableFuture.completedFuture(AccountResult.alreadyExists(existingByName.get()));
+            }
+
+            return storage().findNameLockByName(account.getName()).thenCompose(lock -> {
+                if (isBlockedByLock(account, lock)) {
+                    return CompletableFuture.completedFuture(AccountResult.nameLocked(lock.get()));
+                }
+
+                CompletionStage<?> lockStage = syncNameLockOnRename(previous, account);
+                return lockStage.thenCompose(ignored -> saveAndAuditUpdate(account));
+            });
+        });
+    }
+
+    @NotNull
+    private CompletionStage<?> syncNameLockOnRename(@NotNull PALAccount previous, @NotNull PALAccount account) {
+        CompletionStage<?> clearOld = previous.getName().equalsIgnoreCase(account.getName())
+                ? CompletableFuture.completedFuture(null)
+                : storage().deleteNameLock(previous.getName());
+
+        AccountNameLock nextLock = createLock(account, "PAL");
+        if (nextLock == null) return clearOld;
+
+        return clearOld.thenCompose(ignored -> storage().saveNameLock(nextLock));
+    }
+
+    @NotNull
+    private CompletionStage<AccountResult> saveAndAuditUpdate(@NotNull PALAccount account) {
+        return storage().saveAccount(account)
+                .thenCompose(ignored -> storage().audit(account.getUniqueId(), account.getName(), "account.update",
+                        account.getLastAddress(), account.getType().name()))
+                .thenApply(ignored -> AccountResult.success(account));
     }
 
     @NotNull
@@ -160,11 +200,16 @@ final class AccountServiceImpl extends AbstractService implements AccountService
 
     @Nullable
     private AccountNameLock createLock(@NotNull AccountCreateRequest request, @NotNull PALAccount account) {
+        return createLock(account, request.getSource());
+    }
+
+    @Nullable
+    private AccountNameLock createLock(@NotNull PALAccount account, @NotNull String source) {
         switch (account.getType()) {
             case PREMIUM:
-                return AccountNameLock.premium(account.getName(), account.getUniqueId(), request.getSource());
+                return AccountNameLock.premium(account.getName(), account.getUniqueId(), source);
             case BEDROCK:
-                return AccountNameLock.bedrock(account.getName(), account.getUniqueId(), request.getSource());
+                return AccountNameLock.bedrock(account.getName(), account.getUniqueId(), source);
             case OFFLINE:
             case UNKNOWN:
             default:
