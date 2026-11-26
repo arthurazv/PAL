@@ -4,6 +4,7 @@ import com.bitaspire.pal.account.AccountCreateRequest;
 import com.bitaspire.pal.account.AccountResult;
 import com.bitaspire.pal.account.PALAccount;
 import com.bitaspire.pal.auth.AuthSource;
+import com.bitaspire.pal.identity.IdentityProvider;
 import com.bitaspire.pal.identity.IdentityRequest;
 import com.bitaspire.pal.identity.IdentityResult;
 import com.bitaspire.pal.identity.IdentityType;
@@ -292,10 +293,16 @@ final class PreAuthServiceImpl extends AbstractService implements PluginMessageL
 
         PALAccount.Type type = accountType(identity.getType());
         if (type == PALAccount.Type.UNKNOWN) return CompletableFuture.completedFuture(null);
-        if (!isAutoLoginEnabled(type)) return CompletableFuture.completedFuture(null);
+        boolean floodgateVerified = identity.getProvider() == IdentityProvider.FLOODGATE && identity.isVerified();
+        boolean autoLoginAllowed = isAutoLoginEnabled(type)
+                || (floodgateVerified && isAutoLoginEnabled(PALAccount.Type.BEDROCK));
+        if (!autoLoginAllowed) return CompletableFuture.completedFuture(null);
 
         if (currentAccount.isPresent()) {
             PALAccount account = currentAccount.get();
+            // Linked Floodgate players are already verified by Xbox Live/Floodgate, even if their
+            // stored Java account is OFFLINE or uses a Mojang UUID different from the offline UUID.
+            if (floodgateVerified) return syncNameAndCreateSession(player, account, identity);
             if (matches(account, type, identity.getUniqueId())) return syncNameAndCreateSession(player, account, identity);
             if (canUpgradeOffline(account, type, identity)) return upgradeOfflineAccount(player, account, identity);
         }
