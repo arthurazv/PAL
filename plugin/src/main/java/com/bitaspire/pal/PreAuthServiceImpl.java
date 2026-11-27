@@ -258,11 +258,23 @@ final class PreAuthServiceImpl extends AbstractService implements PluginMessageL
                 .build();
 
         api.getPremiumService().resolveIdentity(request)
-                .thenCompose(identity -> autoLogin(player, currentAccount, identity))
+                .thenCompose(identity -> {
+                    plugin().getLogger().info("[AutoLogin] " + player.getName()
+                            + " uuid=" + player.getUniqueId()
+                            + " -> provider=" + identity.getProvider()
+                            + " type=" + identity.getType()
+                            + " verified=" + identity.isVerified()
+                            + " idUuid=" + identity.getUniqueId()
+                            + " currentAccount=" + currentAccount.map(a -> a.getType() + ":" + a.getUniqueId()).orElse("none"));
+                    return autoLogin(player, currentAccount, identity);
+                })
                 .whenComplete((account, throwable) -> plugin().getScheduler().runTask(() -> {
                     Player online = Bukkit.getPlayer(state.getPlayerId());
                     if (online == null) return;
                     if (throwable != null || account == null) {
+                        if (throwable != null) {
+                            plugin().getLogger().warning("[AutoLogin] Error for " + player.getName() + ": " + rootMessage(throwable));
+                        }
                         if (!isAuthenticated(online)) prompt(online);
                         return;
                     }

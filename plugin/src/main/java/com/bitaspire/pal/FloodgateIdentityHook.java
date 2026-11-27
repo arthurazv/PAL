@@ -21,24 +21,34 @@ final class FloodgateIdentityHook {
         if (request.getUniqueId() == null) return Optional.empty();
 
         FloodgateApi api = FloodgateApi.getInstance();
-        if (api == null || !api.isFloodgatePlayer(request.getUniqueId())) return Optional.empty();
+        if (api == null) return Optional.empty();
 
         FloodgatePlayer player = api.getPlayer(request.getUniqueId());
-        UUID uniqueId = request.getUniqueId();
-        String name = request.getName();
-
-        if (player != null) {
-            uniqueId = firstUniqueId(player.getCorrectUniqueId(), uniqueId);
-            name = firstNonBlank(player.getCorrectUsername(), name);
-
-            if (player.isLinked()) {
-                return Optional.of(IdentityResult.verifiedPremium(
-                        IdentityProvider.FLOODGATE,
-                        firstUniqueId(player.getJavaUniqueId(), uniqueId),
-                        firstNonBlank(player.getJavaUsername(), name),
-                        IdentityTrust.FLOODGATE
-                ));
+        if (player == null) {
+            for (FloodgatePlayer candidate : api.getPlayers()) {
+                if (request.getUniqueId().equals(candidate.getCorrectUniqueId())
+                        || request.getUniqueId().equals(candidate.getJavaUniqueId())
+                        || (request.getName() != null && (
+                                request.getName().equalsIgnoreCase(candidate.getCorrectUsername())
+                                || request.getName().equalsIgnoreCase(candidate.getJavaUsername())
+                        ))) {
+                    player = candidate;
+                    break;
+                }
             }
+        }
+        if (player == null) return Optional.empty();
+
+        UUID uniqueId = firstUniqueId(player.getCorrectUniqueId(), request.getUniqueId());
+        String name = firstNonBlank(player.getCorrectUsername(), request.getName());
+
+        if (player.isLinked()) {
+            return Optional.of(IdentityResult.verifiedPremium(
+                    IdentityProvider.FLOODGATE,
+                    firstUniqueId(player.getJavaUniqueId(), uniqueId),
+                    firstNonBlank(player.getJavaUsername(), name),
+                    IdentityTrust.FLOODGATE
+            ));
         }
 
         return Optional.of(IdentityResult.bedrock(IdentityProvider.FLOODGATE, uniqueId, name, IdentityTrust.FLOODGATE));
