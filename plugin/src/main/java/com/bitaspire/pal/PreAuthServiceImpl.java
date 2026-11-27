@@ -258,16 +258,7 @@ final class PreAuthServiceImpl extends AbstractService implements PluginMessageL
                 .build();
 
         api.getPremiumService().resolveIdentity(request)
-                .thenCompose(identity -> {
-                    plugin().getLogger().info("[AutoLogin] " + player.getName()
-                            + " uuid=" + player.getUniqueId()
-                            + " -> provider=" + identity.getProvider()
-                            + " type=" + identity.getType()
-                            + " verified=" + identity.isVerified()
-                            + " idUuid=" + identity.getUniqueId()
-                            + " currentAccount=" + currentAccount.map(a -> a.getType() + ":" + a.getUniqueId()).orElse("none"));
-                    return autoLogin(player, currentAccount, identity);
-                })
+                .thenCompose(identity -> autoLogin(player, currentAccount, identity))
                 .whenComplete((account, throwable) -> plugin().getScheduler().runTask(() -> {
                     Player online = Bukkit.getPlayer(state.getPlayerId());
                     if (online == null) return;
@@ -314,7 +305,7 @@ final class PreAuthServiceImpl extends AbstractService implements PluginMessageL
             PALAccount account = currentAccount.get();
             // Linked Floodgate players are already verified by Xbox Live/Floodgate, even if their
             // stored Java account is OFFLINE or uses a Mojang UUID different from the offline UUID.
-            if (floodgateVerified) return syncNameAndCreateSession(player, account, identity);
+            if (floodgateVerified) return createSession(player, account);
             if (matches(account, type, identity.getUniqueId())) return syncNameAndCreateSession(player, account, identity);
             if (canUpgradeOffline(account, type, identity)) return upgradeOfflineAccount(player, account, identity);
         }
